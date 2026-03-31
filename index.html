@@ -1,0 +1,2664 @@
+my-ai-app/
+├── backend/
+│   ├── server.js
+│   ├── routes/
+│   │   └── chat.js
+│   └── package.json
+├── frontend/
+│   ├── index.html
+│   ├── style.css
+│   └── script.js
+└── .env
+# نیا فولڈر بنائیں
+mkdir my-ai-app
+cd my-ai-app
+
+# Backend فولڈر بنائیں
+mkdir backend
+cd backend
+
+# package.json بنائیں
+npm init -y
+
+# ضروری پیکجز انسٹال کریں
+npm install express cors dotenv bytez.js
+npm install -D nodemon
+# backend/.env
+BYTEZ_API_KEY=1678a7a24768da694131a62a10a7903b
+PORT=5000
+// backend/server.js
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import Bytez from 'bytez.js';
+import chatRoutes from './routes/chat.js';
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Bytez SDK Initialize
+const bytez = new Bytez(process.env.BYTEZ_API_KEY);
+
+// Routes
+app.use('/api/chat', chatRoutes);
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ message: 'AI API is running 🚀' });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: 'Something went wrong!' });
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
+
+export { bytez };
+// backend/routes/chat.js
+import express from 'express';
+import { bytez } from '../server.js';
+
+const router = express.Router();
+
+// Chat history store (in production, use database)
+let conversations = new Map();
+
+// Send message to AI
+router.post('/send', async (req, res) => {
+  try {
+    const { message, sessionId = 'default' } = req.body;
+    
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+    
+    // Get or create conversation history
+    if (!conversations.has(sessionId)) {
+      conversations.set(sessionId, []);
+    }
+    
+    const history = conversations.get(sessionId);
+    
+    // Add user message to history
+    history.push({
+      role: 'user',
+      content: message
+    });
+    
+    // Select GPT-5 model
+    const model = bytez.model('openai/gpt-5');
+    
+    // Send to AI with full context
+    const { error, output } = await model.run(history);
+    
+    if (error) {
+      throw new Error(error);
+    }
+    
+    // Add AI response to history
+    history.push({
+      role: 'assistant',
+      content: output
+    });
+    
+    // Keep only last 50 messages to manage memory
+    if (history.length > 50) {
+      history.splice(0, history.length - 50);
+    }
+    
+    res.json({
+      success: true,
+      response: output,
+      sessionId: sessionId
+    });
+    
+  } catch (error) {
+    console.error('Chat error:', error);
+    res.status(500).json({ 
+      error: 'Failed to get response from AI',
+      details: error.message 
+    });
+  }
+});
+
+// Clear conversation history
+router.delete('/clear/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+  
+  if (conversations.has(sessionId)) {
+    conversations.delete(sessionId);
+    res.json({ success: true, message: 'Conversation cleared' });
+  } else {
+    res.json({ success: false, message: 'Session not found' });
+  }
+});
+
+// Get conversation history
+router.get('/history/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+  const history = conversations.get(sessionId) || [];
+  
+  res.json({
+    success: true,
+    history: history,
+    count: history.length
+  });
+});
+
+export default router;
+<!-- frontend/index.html -->
+<!DOCTYPE html>
+<html lang="ur">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My AI Assistant - Urdu/Hindi Support</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="logo">
+                <h2>🤖 My AI</h2>
+                <p>Powered by GPT-5</p>
+            </div>
+            
+            <div class="chat-sessions">
+                <button id="newChatBtn" class="new-chat-btn">
+                    ➕ New Chat
+                </button>
+                <div id="sessionsList" class="sessions-list">
+                    <!-- Dynamic sessions will appear here -->
+                </div>
+            </div>
+            
+            <div class="footer-info">
+                <p>💡 Tips:</p>
+                <ul>
+                    <li>Ask anything</li>
+                    <li>Supports Urdu/Hindi</li>
+                    <li>Conversation memory</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="chat-area">
+            <div class="chat-header">
+                <h3 id="currentSession">Chat Session</h3>
+                <button id="clearChatBtn" class="clear-btn">🗑️ Clear Chat</button>
+            </div>
+            
+            <div id="messagesContainer" class="messages-container">
+                <div class="welcome-message">
+                    <div class="welcome-icon">👋</div>
+                    <h3>Welcome to My AI Assistant!</h3>
+                    <p>Ask me anything. I can help with questions in Urdu, Hindi, or English.</p>
+                    <p>Try: "مجھے پاکستان کے بارے میں بتاؤ" or "What is machine learning?"</p>
+                </div>
+            </div>
+            
+            <div class="input-area">
+                <textarea 
+                    id="messageInput" 
+                    placeholder="Type your message here... (Urdu/Hindi/English)"
+                    rows="3"
+                ></textarea>
+                <button id="sendBtn" class="send-btn">
+                    <span>Send</span>
+                    <span class="send-icon">📤</span>
+                </button>
+            </div>
+            
+            <div class="typing-indicator" id="typingIndicator" style="display: none;">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="typing-text">AI is thinking...</span>
+            </div>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
+/* frontend/style.css */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    height: 100vh;
+    overflow: hidden;
+}
+
+.container {
+    display: flex;
+    height: 100vh;
+    background: white;
+}
+
+/* Sidebar Styles */
+.sidebar {
+    width: 280px;
+    background: #1a1a2e;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+}
+
+.logo {
+    padding: 30px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.logo h2 {
+    font-size: 24px;
+    margin-bottom: 5px;
+}
+
+.logo p {
+    font-size: 12px;
+    opacity: 0.7;
+}
+
+.chat-sessions {
+    flex: 1;
+    padding: 20px;
+}
+
+.new-chat-btn {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 20px;
+    transition: transform 0.2s;
+}
+
+.new-chat-btn:hover {
+    transform: translateY(-2px);
+}
+
+.sessions-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.session-item {
+    padding: 12px;
+    margin-bottom: 8px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.session-item:hover {
+    background: rgba(255,255,255,0.1);
+}
+
+.session-item.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.footer-info {
+    padding: 20px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    font-size: 12px;
+}
+
+.footer-info ul {
+    margin-top: 10px;
+    padding-left: 20px;
+}
+
+/* Chat Area Styles */
+.chat-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #f8f9fa;
+}
+
+.chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 30px;
+    background: white;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.clear-btn {
+    padding: 8px 16px;
+    background: #ff4757;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.clear-btn:hover {
+    background: #ff3838;
+}
+
+.messages-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 30px;
+}
+
+.welcome-message {
+    text-align: center;
+    padding: 50px;
+    background: white;
+    border-radius: 12px;
+    margin: 50px auto;
+    max-width: 500px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.welcome-icon {
+    font-size: 64px;
+    margin-bottom: 20px;
+}
+
+.message {
+    margin-bottom: 20px;
+    display: flex;
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.message.user {
+    justify-content: flex-end;
+}
+
+.message.assistant {
+    justify-content: flex-start;
+}
+
+.message-content {
+    max-width: 70%;
+    padding: 12px 18px;
+    border-radius: 18px;
+    line-height: 1.5;
+}
+
+.user .message-content {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.assistant .message-content {
+    background: white;
+    color: #333;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.input-area {
+    padding: 20px 30px;
+    background: white;
+    border-top: 1px solid #e0e0e0;
+    display: flex;
+    gap: 15px;
+}
+
+textarea {
+    flex: 1;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 14px;
+    resize: none;
+    transition: border-color 0.2s;
+}
+
+textarea:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.send-btn {
+    padding: 0 24px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: transform 0.2s;
+}
+
+.send-btn:hover {
+    transform: scale(0.98);
+}
+
+.typing-indicator {
+    position: fixed;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: white;
+    padding: 12px 20px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.dot {
+    width: 8px;
+    height: 8px;
+    background: #667eea;
+    border-radius: 50%;
+    animation: bounce 0.5s infinite;
+}
+
+.dot:nth-child(2) { animation-delay: 0.1s; }
+.dot:nth-child(3) { animation-delay: 0.2s; }
+
+@keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .sidebar {
+        position: fixed;
+        left: -280px;
+        transition: left 0.3s;
+        z-index: 1000;
+    }
+    
+    .sidebar.open {
+        left: 0;
+    }
+    
+    .message-content {
+        max-width: 85%;
+    }
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+// frontend/script.js
+class AIAssistant {
+    constructor() {
+        this.apiUrl = 'http://localhost:5000/api/chat';
+        this.currentSession = this.generateSessionId();
+        this.messages = [];
+        this.sessions = new Map();
+        
+        this.init();
+    }
+    
+    init() {
+        this.loadSessions();
+        this.setupEventListeners();
+        this.setupEnterKey();
+    }
+    
+    generateSessionId() {
+        return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+    
+    setupEventListeners() {
+        document.getElementById('sendBtn').addEventListener('click', () => this.sendMessage());
+        document.getElementById('clearChatBtn').addEventListener('click', () => this.clearChat());
+        document.getElementById('newChatBtn').addEventListener('click', () => this.newChat());
+    }
+    
+    setupEnterKey() {
+        const input = document.getElementById('messageInput');
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.sendMessage();
+            }
+        });
+    }
+    
+    async sendMessage() {
+        const input = document.getElementById('messageInput');
+        const message = input.value.trim();
+        
+        if (!message) return;
+        
+        // Clear input
+        input.value = '';
+        
+        // Add user message to UI
+        this.addMessage(message, 'user');
+        
+        // Show typing indicator
+        this.showTypingIndicator();
+        
+        try {
+            const response = await fetch(`${this.apiUrl}/send`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    message: message,
+                    sessionId: this.currentSession
+                })
+            });
+            
+            const data = await response.json();
+            
+            // Hide typing indicator
+            this.hideTypingIndicator();
+            
+            if (data.success) {
+                this.addMessage(data.response, 'assistant');
+                this.saveToLocalStorage();
+            } else {
+                this.addMessage('Sorry, an error occurred. Please try again.', 'assistant');
+                console.error('API Error:', data.error);
+            }
+        } catch (error) {
+            this.hideTypingIndicator();
+            this.addMessage('Network error. Please check if server is running.', 'assistant');
+            console.error('Network Error:', error);
+        }
+    }
+    
+    addMessage(content, role) {
+        const container = document.getElementById('messagesContainer');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${role}`;
+        
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        
+        // Support for Urdu/Hindi text
+        contentDiv.innerHTML = this.formatMessage(content);
+        
+        messageDiv.appendChild(contentDiv);
+        container.appendChild(messageDiv);
+        
+        // Scroll to bottom
+        container.scrollTop = container.scrollHeight;
+        
+        // Store message
+        this.messages.push({ role, content, timestamp: new Date() });
+        
+        // Remove welcome message if exists
+        const welcomeMsg = document.querySelector('.welcome-message');
+        if (welcomeMsg && this.messages.length > 0) {
+            welcomeMsg.remove();
+        }
+    }
+    
+    formatMessage(content) {
+        // Convert URLs to clickable links
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        content = content.replace(urlRegex, '<a href="$1" target="_blank">$1</a>');
+        
+        // Convert line breaks to <br>
+        content = content.replace(/\n/g, '<br>');
+        
+        return content;
+    }
+    
+    showTypingIndicator() {
+        const indicator = document.getElementById('typingIndicator');
+        indicator.style.display = 'flex';
+    }
+    
+    hideTypingIndicator() {
+        const indicator = document.getElementById('typingIndicator');
+        indicator.style.display = 'none';
+    }
+    
+    async clearChat() {
+        if (confirm('Are you sure you want to clear this conversation?')) {
+            try {
+                await fetch(`${this.apiUrl}/clear/${this.currentSession}`, {
+                    method: 'DELETE'
+                });
+                
+                // Clear messages in UI
+                const container = document.getElementById('messagesContainer');
+                container.innerHTML = `
+                    <div class="welcome-message">
+                        <div class="welcome-icon">👋</div>
+                        <h3>Welcome to My AI Assistant!</h3>
+                        <p>Ask me anything. I can help with questions in Urdu, Hindi, or English.</p>
+                        <p>Try: "مجھے پاکستان کے بارے میں بتاؤ" or "What is machine learning?"</p>
+                    </div>
+                `;
+                
+                this.messages = [];
+                this.saveToLocalStorage();
+                
+            } catch (error) {
+                console.error('Error clearing chat:', error);
+            }
+        }
+    }
+    
+    newChat() {
+        this.currentSession = this.generateSessionId();
+        this.messages = [];
+        this.clearChat();
+        this.saveSession();
+        this.updateSessionsList();
+        
+        // Update header
+        document.getElementById('currentSession').textContent = `Chat ${this.sessions.size + 1}`;
+    }
+    
+    saveSession() {
+        if (!this.sessions.has(this.currentSession)) {
+            this.sessions.set(this.currentSession, {
+                name: `Chat ${this.sessions.size + 1}`,
+                created: new Date(),
+                lastMessage: null
+            });
+        }
+        this.saveToLocalStorage();
+        this.updateSessionsList();
+    }
+    
+    saveToLocalStorage() {
+        const data = {
+            sessions: Array.from(this.sessions.entries()),
+            currentSession: this.currentSession
+        };
+        localStorage.setItem('aiAssistant', JSON.stringify(data));
+    }
+    
+    loadSessions() {
+        const saved = localStorage.getItem('aiAssistant');
+        if (saved) {
+            const data = JSON.parse(saved);
+            this.sessions = new Map(data.sessions);
+            this.currentSession = data.currentSession;
+        }
+        this.updateSessionsList();
+    }
+    
+    updateSessionsList() {
+        const container = document.getElementById('sessionsList');
+        container.innerHTML = '';
+        
+        for (const [id, session] of this.sessions) {
+            const sessionDiv = document.createElement('div');
+            sessionDiv.className = 'session-item';
+            if (id === this.currentSession) {
+                sessionDiv.classList.add('active');
+            }
+            sessionDiv.innerHTML = `
+                <strong>${session.name}</strong>
+                <small style="display: block; font-size: 10px; opacity: 0.7;">
+                    ${new Date(session.created).toLocaleDateString()}
+                </small>
+            `;
+            sessionDiv.onclick = () => this.switchSession(id);
+            container.appendChild(sessionDiv);
+        }
+    }
+    
+    async switchSession(sessionId) {
+        this.currentSession = sessionId;
+        
+        // Clear current messages
+        const container = document.getElementById('messagesContainer');
+        container.innerHTML = `
+            <div class="welcome-message">
+                <div class="welcome-icon">👋</div>
+                <h3>Loading conversation...</h3>
+            </div>
+        `;
+        
+        try {
+            const response = await fetch(`${this.apiUrl}/history/${sessionId}`);
+            const data = await response.json();
+            
+            if (data.success && data.history.length > 0) {
+                container.innerHTML = '';
+                this.messages = [];
+                
+                data.history.forEach(msg => {
+                    this.addMessage(msg.content, msg.role);
+                });
+            } else {
+                container.innerHTML = `
+                    <div class="welcome-message">
+                        <div class="welcome-icon">👋</div>
+                        <h3>Welcome to My AI Assistant!</h3>
+                        <p>This is a new conversation. Ask me anything!</p>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error loading history:', error);
+        }
+        
+        this.updateSessionsList();
+        document.getElementById('currentSession').textContent = 
+            this.sessions.get(sessionId)?.name || 'Chat Session';
+    }
+}
+
+// Initialize the app
+const app = new AIAssistant();
+{
+  "name": "my-ai-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "bytez.js": "^1.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
+# 1. Backend شروع کریں
+cd backend
+npm run dev
+
+# 2. Frontend (HTML فائل کو براؤزر میں کھولیں)
+# یا VS Code Live Server استعمال کریں
+
+# 3. براؤزر میں جائیں
+http://localhost:5000  # Backend API
+http://localhost:5500  # Frontend (Live Server)
+my-ai-app/
+├── backend/
+│   ├── server.js
+│   ├── routes/
+│   │   ├── chat.js
+│   │   ├── auth.js
+│   │   ├── image.js
+│   │   └── upload.js
+│   ├── models/
+│   │   └── User.js
+│   ├── middleware/
+│   │   └── auth.js
+│   ├── config/
+│   │   └── database.js
+│   ├── uploads/
+│   ├── package.json
+│   └── .env
+├── frontend/
+│   ├── index.html
+│   ├── style.css
+│   ├── script.js
+│   └── audio-processor.js
+└── .env
+cd backend
+
+# Database اور Authentication کے لیے
+npm install mongoose bcryptjs jsonwebtoken
+
+# File Upload کے لیے
+npm install multer
+
+# Image Generation کے لیے
+npm install axios form-data
+
+# Security کے لیے
+npm install helmet express-rate-limit
+
+# Voice Processing کے لیے
+npm install multer gridfs-stream
+// backend/config/database.js
+import mongoose from 'mongoose';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const connectDB = async () => {
+    try {
+        await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ai_app', {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+        });
+        console.log('✅ MongoDB Connected Successfully');
+    } catch (error) {
+        console.error('❌ MongoDB Connection Error:', error);
+        process.exit(1);
+    }
+};
+
+export default connectDB;
+// backend/models/User.js
+import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
+
+const userSchema = new mongoose.Schema({
+    username: {
+        type: String,
+        required: true,
+        unique: true,
+        trim: true,
+        minlength: 3,
+        maxlength: 30
+    },
+    email: {
+        type: String,
+        required: true,
+        unique: true,
+        lowercase: true,
+        trim: true
+    },
+    password: {
+        type: String,
+        required: true,
+        minlength: 6
+    },
+    profilePicture: {
+        type: String,
+        default: ''
+    },
+    role: {
+        type: String,
+        enum: ['user', 'admin'],
+        default: 'user'
+    },
+    isActive: {
+        type: Boolean,
+        default: true
+    },
+    lastLogin: {
+        type: Date,
+        default: Date.now
+    },
+    conversations: [{
+        sessionId: String,
+        title: String,
+        createdAt: Date,
+        messages: [{
+            role: String,
+            content: String,
+            timestamp: Date,
+            attachments: [{
+                type: String,
+                url: String
+            }]
+        }]
+    }],
+    images: [{
+        prompt: String,
+        url: String,
+        createdAt: Date
+    }],
+    createdAt: {
+        type: Date,
+        default: Date.now
+    }
+});
+
+// Hash password before saving
+userSchema.pre('save', async function(next) {
+    if (!this.isModified('password')) return next();
+    
+    try {
+        const salt = await bcrypt.genSalt(10);
+        this.password = await bcrypt.hash(this.password, salt);
+        next();
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Compare password method
+userSchema.methods.comparePassword = async function(candidatePassword) {
+    return await bcrypt.compare(candidatePassword, this.password);
+};
+
+const User = mongoose.model('User', userSchema);
+export default User;
+// backend/middleware/auth.js
+import jwt from 'jsonwebtoken';
+import User from '../models/User.js';
+
+export const protect = async (req, res, next) => {
+    let token;
+    
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+        try {
+            token = req.headers.authorization.split(' ')[1];
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret_key');
+            req.user = await User.findById(decoded.id).select('-password');
+            next();
+        } catch (error) {
+            res.status(401).json({ error: 'Not authorized, token failed' });
+        }
+    }
+    
+    if (!token) {
+        res.status(401).json({ error: 'Not authorized, no token' });
+    }
+};
+
+export const adminOnly = (req, res, next) => {
+    if (req.user && req.user.role === 'admin') {
+        next();
+    } else {
+        res.status(403).json({ error: 'Admin access required' });
+    }
+};
+// backend/routes/auth.js
+import express from 'express';
+import jwt from 'jsonwebtoken';
+import User from '../models/User.js';
+import { protect } from '../middleware/auth.js';
+
+const router = express.Router();
+
+// Generate JWT Token
+const generateToken = (id) => {
+    return jwt.sign({ id }, process.env.JWT_SECRET || 'secret_key', {
+        expiresIn: '30d'
+    });
+};
+
+// Register User
+router.post('/register', async (req, res) => {
+    try {
+        const { username, email, password } = req.body;
+        
+        // Check if user exists
+        const userExists = await User.findOne({ $or: [{ email }, { username }] });
+        if (userExists) {
+            return res.status(400).json({ error: 'User already exists' });
+        }
+        
+        // Create user
+        const user = await User.create({
+            username,
+            email,
+            password
+        });
+        
+        res.status(201).json({
+            success: true,
+            user: {
+                id: user._id,
+                username: user.username,
+                email: user.email,
+                role: user.role
+            },
+            token: generateToken(user._id)
+        });
+        
+    } catch (error) {
+        console.error('Register error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Login User
+router.post('/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        
+        // Find user
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+        
+        // Check password
+        const isMatch = await user.comparePassword(password);
+        if (!isMatch) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+        
+        // Update last login
+        user.lastLogin = Date.now();
+        await user.save();
+        
+        res.json({
+            success: true,
+            user: {
+                id: user._id,
+                username: user.username,
+                email: user.email,
+                role: user.role
+            },
+            token: generateToken(user._id)
+        });
+        
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Get current user
+router.get('/me', protect, async (req, res) => {
+    res.json({
+        success: true,
+        user: req.user
+    });
+});
+
+// Update user profile
+router.put('/profile', protect, async (req, res) => {
+    try {
+        const { username, profilePicture } = req.body;
+        
+        const user = await User.findById(req.user._id);
+        if (username) user.username = username;
+        if (profilePicture) user.profilePicture = profilePicture;
+        
+        await user.save();
+        
+        res.json({
+            success: true,
+            user: {
+                id: user._id,
+                username: user.username,
+                email: user.email,
+                profilePicture: user.profilePicture
+            }
+        });
+        
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+export default router;
+// backend/routes/image.js
+import express from 'express';
+import axios from 'axios';
+import FormData from 'form-data';
+import { protect } from '../middleware/auth.js';
+import User from '../models/User.js';
+import { bytez } from '../server.js';
+
+const router = express.Router();
+
+// Generate Image using DALL-E or similar
+router.post('/generate', protect, async (req, res) => {
+    try {
+        const { prompt, size = '1024x1024' } = req.body;
+        
+        if (!prompt) {
+            return res.status(400).json({ error: 'Prompt is required' });
+        }
+        
+        // Using Bytez image generation model
+        const model = bytez.model('openai/dall-e-3');
+        
+        const { error, output } = await model.run({
+            prompt: prompt,
+            size: size,
+            quality: 'hd',
+            n: 1
+        });
+        
+        if (error) {
+            throw new Error(error);
+        }
+        
+        // Save image to user's history
+        await User.findByIdAndUpdate(req.user._id, {
+            $push: {
+                images: {
+                    prompt: prompt,
+                    url: output.url,
+                    createdAt: new Date()
+                }
+            }
+        });
+        
+        res.json({
+            success: true,
+            imageUrl: output.url,
+            prompt: prompt,
+            revisedPrompt: output.revised_prompt
+        });
+        
+    } catch (error) {
+        console.error('Image generation error:', error);
+        res.status(500).json({ error: 'Failed to generate image' });
+    }
+});
+
+// Get user's image history
+router.get('/history', protect, async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id);
+        res.json({
+            success: true,
+            images: user.images.slice(-20) // Last 20 images
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch images' });
+    }
+});
+
+// Delete image from history
+router.delete('/:imageId', protect, async (req, res) => {
+    try {
+        await User.findByIdAndUpdate(req.user._id, {
+            $pull: { images: { _id: req.params.imageId } }
+        });
+        
+        res.json({ success: true, message: 'Image deleted' });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to delete image' });
+    }
+});
+
+export default router;
+// backend/routes/chat.js (Updated)
+import express from 'express';
+import { protect } from '../middleware/auth.js';
+import { bytez } from '../server.js';
+import User from '../models/User.js';
+
+const router = express.Router();
+
+// Send message with voice and file support
+router.post('/send', protect, async (req, res) => {
+    try {
+        const { message, sessionId, attachments = [] } = req.body;
+        
+        if (!message && attachments.length === 0) {
+            return res.status(400).json({ error: 'Message or attachment required' });
+        }
+        
+        // Get user's conversation
+        let user = await User.findById(req.user._id);
+        let conversation = user.conversations.find(c => c.sessionId === sessionId);
+        
+        if (!conversation) {
+            conversation = {
+                sessionId: sessionId,
+                title: message?.slice(0, 30) || 'New Chat',
+                createdAt: new Date(),
+                messages: []
+            };
+            user.conversations.push(conversation);
+        }
+        
+        // Prepare messages for AI
+        const messages = conversation.messages.map(msg => ({
+            role: msg.role,
+            content: msg.content
+        }));
+        
+        // Add user message
+        messages.push({
+            role: 'user',
+            content: message || 'I have attached some files'
+        });
+        
+        // Select model
+        const model = bytez.model('openai/gpt-5');
+        
+        // Send to AI
+        const { error, output } = await model.run(messages);
+        
+        if (error) throw new Error(error);
+        
+        // Save messages
+        conversation.messages.push({
+            role: 'user',
+            content: message,
+            timestamp: new Date(),
+            attachments: attachments
+        });
+        
+        conversation.messages.push({
+            role: 'assistant',
+            content: output,
+            timestamp: new Date()
+        });
+        
+        await user.save();
+        
+        res.json({
+            success: true,
+            response: output,
+            sessionId: sessionId
+        });
+        
+    } catch (error) {
+        console.error('Chat error:', error);
+        res.status(500).json({ error: 'Failed to get response' });
+    }
+});
+
+// Voice to Text endpoint
+router.post('/voice-to-text', protect, async (req, res) => {
+    try {
+        const { audioUrl } = req.body;
+        
+        if (!audioUrl) {
+            return res.status(400).json({ error: 'Audio URL required' });
+        }
+        
+        // Use Whisper API for transcription
+        const model = bytez.model('openai/whisper-1');
+        
+        const { error, output } = await model.run({
+            file: audioUrl,
+            model: 'whisper-1',
+            language: 'ur'
+        });
+        
+        if (error) throw new Error(error);
+        
+        res.json({
+            success: true,
+            text: output.text,
+            language: output.language
+        });
+        
+    } catch (error) {
+        console.error('Voice to text error:', error);
+        res.status(500).json({ error: 'Failed to convert voice' });
+    }
+});
+
+// Text to Voice endpoint
+router.post('/text-to-voice', protect, async (req, res) => {
+    try {
+        const { text, voice = 'alloy' } = req.body;
+        
+        if (!text) {
+            return res.status(400).json({ error: 'Text required' });
+        }
+        
+        // Use TTS model
+        const model = bytez.model('openai/tts-1');
+        
+        const { error, output } = await model.run({
+            input: text,
+            voice: voice,
+            model: 'tts-1'
+        });
+        
+        if (error) throw new Error(error);
+        
+        res.json({
+            success: true,
+            audioUrl: output.audio_url
+        });
+        
+    } catch (error) {
+        console.error('Text to voice error:', error);
+        res.status(500).json({ error: 'Failed to convert text to voice' });
+    }
+});
+
+// Get user conversations
+router.get('/conversations', protect, async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id);
+        const conversations = user.conversations.map(c => ({
+            sessionId: c.sessionId,
+            title: c.title,
+            createdAt: c.createdAt,
+            messageCount: c.messages.length
+        }));
+        
+        res.json({
+            success: true,
+            conversations: conversations
+        });
+        
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch conversations' });
+    }
+});
+
+export default router;
+// backend/server.js (Updated)
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import Bytez from 'bytez.js';
+import connectDB from './config/database.js';
+import authRoutes from './routes/auth.js';
+import chatRoutes from './routes/chat.js';
+import imageRoutes from './routes/image.js';
+import uploadRoutes from './routes/upload.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config();
+
+// Connect to Database
+connectDB();
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// Security middleware
+app.use(helmet());
+
+// Rate limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
+});
+app.use('/api', limiter);
+
+// CORS
+app.use(cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:5500',
+    credentials: true
+}));
+
+// Body parser
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Static files
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Initialize Bytez
+const bytez = new Bytez(process.env.BYTEZ_API_KEY);
+
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/image', imageRoutes);
+app.use('/api/upload', uploadRoutes);
+
+// Health check
+app.get('/health', (req, res) => {
+    res.json({ status: 'OK', timestamp: new Date() });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({ 
+        error: 'Something went wrong!',
+        message: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+});
+
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`📊 Health check: http://localhost:${PORT}/health`);
+});
+
+export { bytez };
+<!-- frontend/index.html (Updated with all features) -->
+<!DOCTYPE html>
+<html lang="ur">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced AI Assistant - Voice, Images & More</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Login/Register Modal -->
+    <div id="authModal" class="modal">
+        <div class="modal-content">
+            <div class="auth-tabs">
+                <button class="tab-btn active" onclick="showAuthTab('login')">Login</button>
+                <button class="tab-btn" onclick="showAuthTab('register')">Register</button>
+            </div>
+            
+            <div id="loginForm" class="auth-form active">
+                <h2>Welcome Back!</h2>
+                <input type="email" id="loginEmail" placeholder="Email" required>
+                <input type="password" id="loginPassword" placeholder="Password" required>
+                <button onclick="login()" class="auth-btn">Login</button>
+            </div>
+            
+            <div id="registerForm" class="auth-form">
+                <h2>Create Account</h2>
+                <input type="text" id="regUsername" placeholder="Username" required>
+                <input type="email" id="regEmail" placeholder="Email" required>
+                <input type="password" id="regPassword" placeholder="Password" required>
+                <button onclick="register()" class="auth-btn">Register</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="container" id="app" style="display: none;">
+        <div class="sidebar">
+            <div class="logo">
+                <h2>🤖 AI Assistant</h2>
+                <p>Powered by GPT-5</p>
+                <div class="user-info" id="userInfo">
+                    <img id="userAvatar" src="" alt="Avatar">
+                    <span id="userName"></span>
+                </div>
+            </div>
+            
+            <div class="features-menu">
+                <button class="feature-btn active" data-feature="chat">
+                    <i class="fas fa-comment"></i> Chat
+                </button>
+                <button class="feature-btn" data-feature="image">
+                    <i class="fas fa-image"></i> Generate Image
+                </button>
+                <button class="feature-btn" data-feature="voice">
+                    <i class="fas fa-microphone"></i> Voice
+                </button>
+                <button class="feature-btn" data-feature="files">
+                    <i class="fas fa-file-upload"></i> Files
+                </button>
+            </div>
+            
+            <div class="chat-sessions">
+                <button id="newChatBtn" class="new-chat-btn">
+                    <i class="fas fa-plus"></i> New Chat
+                </button>
+                <div id="sessionsList" class="sessions-list"></div>
+            </div>
+            
+            <div class="footer-info">
+                <button id="logoutBtn" class="logout-btn">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+            </div>
+        </div>
+        
+        <div class="main-area">
+            <!-- Chat Feature -->
+            <div id="chatFeature" class="feature-content active">
+                <div class="chat-header">
+                    <h3 id="currentSession">Chat Session</h3>
+                    <div class="chat-actions">
+                        <button id="voiceInputBtn" class="action-btn" title="Voice Input">
+                            <i class="fas fa-microphone"></i>
+                        </button>
+                        <button id="attachFileBtn" class="action-btn" title="Attach File">
+                            <i class="fas fa-paperclip"></i>
+                        </button>
+                        <button id="clearChatBtn" class="action-btn clear-btn">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="messagesContainer" class="messages-container">
+                    <div class="welcome-message">
+                        <div class="welcome-icon">👋</div>
+                        <h3>Welcome to Advanced AI Assistant!</h3>
+                        <p>I can help you with:</p>
+                        <ul>
+                            <li>💬 Text conversations in Urdu/Hindi/English</li>
+                            <li>🎤 Voice input and output</li>
+                            <li>🎨 Image generation with DALL-E</li>
+                            <li>📎 File upload and analysis</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="input-area">
+                    <textarea id="messageInput" placeholder="Type your message... (Urdu/Hindi/English)" rows="3"></textarea>
+                    <button id="sendBtn" class="send-btn">
+                        <i class="fas fa-paper-plane"></i> Send
+                    </button>
+                </div>
+                
+                <div class="typing-indicator" id="typingIndicator" style="display: none;">
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                    <span>AI is thinking...</span>
+                </div>
+            </div>
+            
+            <!-- Image Generation Feature -->
+            <div id="imageFeature" class="feature-content">
+                <div class="feature-header">
+                    <h3>🎨 AI Image Generator</h3>
+                    <p>Create stunning images with DALL-E 3</p>
+                </div>
+                
+                <div class="image-generator">
+                    <textarea id="imagePrompt" placeholder="Describe the image you want to create..." rows="3"></textarea>
+                    <div class="image-options">
+                        <select id="imageSize">
+                            <option value="1024x1024">Square (1024x1024)</option>
+                            <option value="1792x1024">Landscape (1792x1024)</option>
+                            <option value="1024x1792">Portrait (1024x1792)</option>
+                        </select>
+                        <button id="generateImageBtn" class="generate-btn">
+                            <i class="fas fa-magic"></i> Generate Image
+                        </button>
+                    </div>
+                    
+                    <div id="generatedImage" class="generated-image" style="display: none;">
+                        <img id="imageResult" src="" alt="Generated Image">
+                        <button id="downloadImageBtn" class="download-btn">
+                            <i class="fas fa-download"></i> Download
+                        </button>
+                    </div>
+                    
+                    <div class="image-history">
+                        <h4>Your Image History</h4>
+                        <div id="imageHistory" class="image-history-grid"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Voice Feature -->
+            <div id="voiceFeature" class="feature-content">
+                <div class="feature-header">
+                    <h3>🎤 Voice Assistant</h3>
+                    <p>Speak naturally and get voice responses</p>
+                </div>
+                
+                <div class="voice-controls">
+                    <button id="startRecordingBtn" class="record-btn">
+                        <i class="fas fa-circle"></i> Start Recording
+                    </button>
+                    <button id="stopRecordingBtn" class="stop-btn" disabled>
+                        <i class="fas fa-stop"></i> Stop
+                    </button>
+                    <div id="voiceStatus" class="voice-status"></div>
+                </div>
+                
+                <div class="voice-text">
+                    <h4>Transcribed Text:</h4>
+                    <div id="transcribedText" class="text-box"></div>
+                    <button id="processVoiceBtn" class="process-btn" disabled>
+                        <i class="fas fa-comment"></i> Process with AI
+                    </button>
+                </div>
+                
+                <div class="voice-response">
+                    <h4>AI Response:</h4>
+                    <div id="voiceResponse" class="response-box"></div>
+                    <button id="speakResponseBtn" class="speak-btn" disabled>
+                        <i class="fas fa-volume-up"></i> Speak Response
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Files Feature -->
+            <div id="filesFeature" class="feature-content">
+                <div class="feature-header">
+                    <h3>📁 File Manager</h3>
+                    <p>Upload and manage your files</p>
+                </div>
+                
+                <div class="file-upload-area">
+                    <input type="file" id="fileInput" multiple>
+                    <label for="fileInput" class="upload-label">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        Click or drag files here
+                    </label>
+                    <button id="uploadFilesBtn" class="upload-btn">Upload Files</button>
+                </div>
+                
+                <div id="uploadProgress" class="upload-progress" style="display: none;">
+                    <div class="progress-bar"></div>
+                </div>
+                
+                <div class="file-list">
+                    <h4>Uploaded Files</h4>
+                    <div id="fileList" class="files-grid"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+    <script src="audio-processor.js"></script>
+</body>
+          </html>
+          // frontend/script.js (Complete with all features)
+class AdvancedAIAssistant {
+    constructor() {
+        this.apiUrl = 'http://localhost:5000/api';
+        this.token = localStorage.getItem('token');
+        this.currentSession = null;
+        this.currentFeature = 'chat';
+        this.mediaRecorder = null;
+        this.audioChunks = [];
+        
+        this.init();
+    }
+    
+    async init() {
+        if (this.token) {
+            await this.verifyToken();
+        } else {
+            this.showAuthModal();
+        }
+        
+        this.setupEventListeners();
+        this.loadConversations();
+        this.loadImageHistory();
+    }
+    
+    async verifyToken() {
+        try {
+            const response = await fetch(`${this.apiUrl}/auth/me`, {
+                headers: {
+                    'Authorization': `Bearer ${this.token}`
+                }
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                this.user = data.user;
+                this.updateUserUI();
+                document.getElementById('app').style.display = 'flex';
+                this.hideAuthModal();
+                this.newChat();
+            } else {
+                this.logout();
+            }
+        } catch (error) {
+            this.logout();
+        }
+    }
+    
+    setupEventListeners() {
+        // Feature switching
+        document.querySelectorAll('.feature-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.switchFeature(btn.dataset.feature));
+        });
+        
+        // Chat events
+        document.getElementById('sendBtn')?.addEventListener('click', () => this.sendMessage());
+        document.getElementById('newChatBtn')?.addEventListener('click', () => this.newChat());
+        document.getElementById('clearChatBtn')?.addEventListener('click', () => this.clearChat());
+        document.getElementById('voiceInputBtn')?.addEventListener('click', () => this.startVoiceInput());
+        document.getElementById('attachFileBtn')?.addEventListener('click', () => this.attachFile());
+        
+        // Image generation
+        document.getElementById('generateImageBtn')?.addEventListener('click', () => this.generateImage());
+        document.getElementById('downloadImageBtn')?.addEventListener('click', () => this.downloadImage());
+        
+        // Voice features
+        document.getElementById('startRecordingBtn')?.addEventListener('click', () => this.startRecording());
+        document.getElementById('stopRecordingBtn')?.addEventListener('click', () => this.stopRecording());
+        document.getElementById('processVoiceBtn')?.addEventListener('click', () => this.processVoiceInput());
+        document.getElementById('speakResponseBtn')?.addEventListener('click', () => this.speakResponse());
+        
+        // File upload
+        document.getElementById('uploadFilesBtn')?.addEventListener('click', () => this.uploadFiles());
+        document.getElementById('fileInput')?.addEventListener('change', () => this.handleFileSelect());
+        
+        // Auth
+        document.getElementById('logoutBtn')?.addEventListener('click', () => this.logout());
+        
+        // Enter key for message
+        document.getElementById('messageInput')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.sendMessage();
+            }
+        });
+    }
+    
+    switchFeature(feature) {
+        this.currentFeature = feature;
+        
+        // Update buttons
+        document.querySelectorAll('.feature-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`.feature-btn[data-feature="${feature}"]`).classList.add('active');
+        
+        // Update content
+        document.querySelectorAll('.feature-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        document.getElementById(`${feature}Feature`).classList.add('active');
+    }
+    
+    async sendMessage() {
+        const input = document.getElementById('messageInput');
+        const message = input.value.trim();
+        
+        if (!message) return;
+        
+        input.value = '';
+        this.addMessage(message, 'user');
+        this.showTypingIndicator();
+        
+        try {
+            const response = await fetch(`${this.apiUrl}/chat/send`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify({
+                    message: message,
+                    sessionId: this.currentSession
+                })
+            });
+            
+            const data = await response.json();
+            this.hideTypingIndicator();
+            
+            if (data.success) {
+                this.addMessage(data.response, 'assistant');
+            } else {
+                this.addMessage('Error: ' + data.error, 'assistant');
+            }
+        } catch (error) {
+            this.hideTypingIndicator();
+            this.addMessage('Network error. Please check your connection.', 'assistant');
+        }
+    }
+    
+    async generateImage() {
+        const prompt = document.getElementById('imagePrompt').value.trim();
+        const size = document.getElementById('imageSize').value;
+        
+        if (!prompt) {
+            alert('Please describe the image you want to create');
+            return;
+        }
+        
+        const generateBtn = document.getElementById('generateImageBtn');
+        generateBtn.disabled = true;
+        generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+        
+        try {
+            const response = await fetch(`${this.apiUrl}/image/generate`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify({ prompt, size })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                const imageDiv = document.getElementById('generatedImage');
+                const img = document.getElementById('imageResult');
+                img.src = data.imageUrl;
+                imageDiv.style.display = 'block';
+                
+                // Save to history
+                this.loadImageHistory();
+            } else {
+                alert('Failed to generate image: ' + data.error);
+            }
+        } catch (error) {
+            alert('Error generating image: ' + error.message);
+        } finally {
+            generateBtn.disabled = false;
+            generateBtn.innerHTML = '<i class="fas fa-magic"></i> Generate Image';
+        }
+    }
+    
+    async loadImageHistory() {
+        try {
+            const response = await fetch(`${this.apiUrl}/image/history`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            
+            const data = await response.json();
+            const historyDiv = document.getElementById('imageHistory');
+            
+            if (data.success && data.images.length > 0) {
+                historyDiv.innerHTML = data.images.map(img => `
+                    <div class="image-card">
+                        <img src="${img.url}" alt="${img.prompt}">
+                        <p>${img.prompt.substring(0, 50)}...</p>
+                        <small>${new Date(img.createdAt).toLocaleDateString()}</small>
+                    </div>
+                `).join('');
+            } else {
+                historyDiv.innerHTML = '<p>No images generated yet</p>';
+            }
+        } catch (error) {
+            console.error('Error loading image history:', error);
+        }
+    }
+    
+    async startRecording() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            this.mediaRecorder = new MediaRecorder(stream);
+            this.audioChunks = [];
+            
+            this.mediaRecorder.ondataavailable = (event) => {
+                this.audioChunks.push(event.data);
+            };
+            
+            this.mediaRecorder.onstop = () => {
+                this.uploadAudio();
+            };
+            
+            this.mediaRecorder.start();
+            document.getElementById('startRecordingBtn').disabled = true;
+            document.getElementById('stopRecordingBtn').disabled = false;
+            document.getElementById('voiceStatus').innerHTML = '<span class="recording">🔴 Recording...</span>';
+            
+        } catch (error) {
+            alert('Microphone access denied');
+        }
+    }
+    
+    stopRecording() {
+        if (this.mediaRecorder) {
+            this.mediaRecorder.stop();
+            this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            document.getElementById('startRecordingBtn').disabled = false;
+            document.getElementById('stopRecordingBtn').disabled = true;
+            document.getElementById('voiceStatus').innerHTML = '<span>✅ Recording stopped, processing...</span>';
+        }
+    }
+    
+    async uploadAudio() {
+        const audioBlob = new Blob(this.audioChunks, { type: 'audio/wav' });
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'recording.wav');
+        
+        // Upload audio and transcribe
+        // This would need a voice-to-text endpoint
+        // For demo, simulate transcription
+        setTimeout(() => {
+            document.getElementById('transcribedText').innerHTML = 'Voice input received. Processing...';
+            document.getElementById('processVoiceBtn').disabled = false;
+        }, 1000);
+    }
+    
+    async processVoiceInput() {
+        const text = document.getElementById('transcribedText').innerText;
+        if (!text || text === 'Voice input received. Processing...') {
+            alert('Please record voice first');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`${this.apiUrl}/chat/send`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: JSON.stringify({
+                    message: text,
+                    sessionId: this.currentSession
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                document.getElementById('voiceResponse').innerHTML = data.response;
+                document.getElementById('speakResponseBtn').disabled = false;
+            }
+        } catch (error) {
+            alert('Error processing voice input');
+        }
+    }
+    
+    speakResponse() {
+        const response = document.getElementById('voiceResponse').innerText;
+        if (response && 'speechSynthesis' in window) {
+            const utterance = new SpeechSynthesisUtterance(response);
+            utterance.lang = 'ur-PK';
+            window.speechSynthesis.speak(utterance);
+        }
+    }
+    
+    async uploadFiles() {
+        const files = document.getElementById('fileInput').files;
+        if (files.length === 0) {
+            alert('Please select files to upload');
+            return;
+        }
+        
+        const formData = new FormData();
+        for (let file of files) {
+            formData.append('files', file);
+        }
+        
+        const uploadBtn = document.getElementById('uploadFilesBtn');
+        uploadBtn.disabled = true;
+        uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+        
+        try {
+            const response = await fetch(`${this.apiUrl}/upload/multiple`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.loadFileList();
+                alert(`Uploaded ${data.files.length} files successfully!`);
+            } else {
+                alert('Upload failed: ' + data.error);
+            }
+        } catch (error) {
+            alert('Error uploading files');
+        } finally {
+            uploadBtn.disabled = false;
+            uploadBtn.innerHTML = 'Upload Files';
+        }
+    }
+    
+    async loadFileList() {
+        // This would need a file list endpoint
+        const fileList = document.getElementById('fileList');
+        fileList.innerHTML = '<p>Files will appear here after upload</p>';
+    }
+    
+    addMessage(content, role) {
+        const container = document.getElementById('messagesContainer');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${role}`;
+        
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        contentDiv.innerHTML = this.formatMessage(content);
+        
+        messageDiv.appendChild(contentDiv);
+        container.appendChild(messageDiv);
+        container.scrollTop = container.scrollHeight;
+        
+        // Remove welcome message if exists
+        const welcomeMsg = document.querySelector('.welcome-message');
+        if (welcomeMsg && container.children.length > 1) {
+            welcomeMsg.remove();
+        }
+    }
+    
+    formatMessage(content) {
+        // Convert URLs to links
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        content = content.replace(urlRegex, '<a href="$1" target="_blank">$1</a>');
+        
+        // Convert line breaks
+        content = content.replace(/\n/g, '<br>');
+        
+        return content;
+    }
+    
+    showTypingIndicator() {
+        document.getElementById('typingIndicator').style.display = 'flex';
+    }
+    
+    hideTypingIndicator() {
+        document.getElementById('typingIndicator').style.display = 'none';
+    }
+    
+    async newChat() {
+        this.currentSession = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        
+        // Clear messages
+        const container = document.getElementById('messagesContainer');
+        container.innerHTML = `
+            <div class="welcome-message">
+                <div class="welcome-icon">👋</div>
+                <h3>New Conversation Started!</h3>
+                <p>How can I help you today?</p>
+            </div>
+        `;
+        
+        this.loadConversations();
+    }
+    
+    async loadConversations() {
+        try {
+            const response = await fetch(`${this.apiUrl}/chat/conversations`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            
+            const data = await response.json();
+            const sessionsList = document.getElementById('sessionsList');
+            
+            if (data.success && data.conversations.length > 0) {
+                sessionsList.innerHTML = data.conversations.map(conv => `
+                    <div class="session-item" onclick="app.switchConversation('${conv.sessionId}')">
+                        <strong>${conv.title}</strong>
+                        <small>${new Date(conv.createdAt).toLocaleDateString()}</small>
+                    </div>
+                `).join('');
+            }
+        } catch (error) {
+            console.error('Error loading conversations:', error);
+        }
+    }
+    
+    async clearChat() {
+        if (confirm('Clear this conversation?')) {
+            const container = document.getElementById('messagesContainer');
+            container.innerHTML = `
+                <div class="welcome-message">
+                    <div class="welcome-icon">🗑️</div>
+                    <h3>Chat Cleared</h3>
+                    <p>Start a new conversation!</p>
+                </div>
+            `;
+        }
+    }
+    
+    async login() {
+        const email = document.getElementById('loginEmail').value;
+        const password = document.getElementById('loginPassword').value;
+        
+        try {
+            const response = await fetch(`${this.apiUrl}/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.token = data.token;
+                localStorage.setItem('token', data.token);
+                this.user = data.user;
+                this.updateUserUI();
+                document.getElementById('app').style.display = 'flex';
+                this.hideAuthModal();
+                this.newChat();
+            } else {
+                alert('Login failed: ' + data.error);
+            }
+        } catch (error) {
+            alert('Error logging in');
+        }
+    }
+    
+    async register() {
+        const username = document.getElementById('regUsername').value;
+        const email = document.getElementById('regEmail').value;
+        const password = document.getElementById('regPassword').value;
+        
+        try {
+            const response = await fetch(`${this.apiUrl}/auth/register`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, email, password })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.token = data.token;
+                localStorage.setItem('token', data.token);
+                this.user = data.user;
+                this.updateUserUI();
+                document.getElementById('app').style.display = 'flex';
+                this.hideAuthModal();
+                this.newChat();
+            } else {
+                alert('Registration failed: ' + data.error);
+            }
+        } catch (error) {
+            alert('Error registering');
+        }
+    }
+    
+    logout() {
+        localStorage.removeItem('token');
+        this.token = null;
+        this.user = null;
+        document.getElementById('app').style.display = 'none';
+        this.showAuthModal();
+    }
+    
+    updateUserUI() {
+        if (this.user) {
+            document.getElementById('userName').innerText = this.user.username;
+            const avatar = document.getElementById('userAvatar');
+            if (this.user.profilePicture) {
+                avatar.src = this.user.profilePicture;
+            } else {
+                avatar.src = `https://ui-avatars.com/api/?name=${this.user.username}&background=667eea&color=fff`;
+            }
+        }
+    }
+    
+    showAuthModal() {
+        document.getElementById('authModal').style.display = 'flex';
+    }
+    
+    hideAuthModal() {
+        document.getElementById('authModal').style.display = 'none';
+    }
+    
+    switchConversation(sessionId) {
+        this.currentSession = sessionId;
+        this.loadConversation(sessionId);
+    }
+    
+    async loadConversation(sessionId) {
+        // Load conversation messages
+        this.newChat(); // Simplified for demo
+    }
+}
+
+// Initialize app
+const app = new AdvancedAIAssistant();
+window.app = app;
+
+// Auth tab switching
+function showAuthTab(tab) {
+    document.querySelectorAll('.auth-form').forEach(form => form.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    
+    if (tab === 'login') {
+        document.getElementById('loginForm').classList.add('active');
+        document.querySelector('.tab-btn:first-child').classList.add('active');
+    } else {
+        document.getElementById('registerForm').classList.add('active');
+        document.quer
+        /* frontend/style.css - Add these styles */
+:root {
+    --primary: #667eea;
+    --secondary: #764ba2;
+    --dark: #1a1a2e;
+    --light: #f8f9fa;
+    --success: #10b981;
+    --danger: #ef4444;
+    --warning: #f59e0b;
+}
+
+/* Modal Styles */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 20px;
+    padding: 40px;
+    width: 90%;
+    max-width: 400px;
+    animation: slideIn 0.3s ease;
+}
+
+.auth-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 30px;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 12px;
+    background: #f0f0f0;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+
+.tab-btn.active {
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    color: white;
+}
+
+.auth-form {
+    display: none;
+}
+
+.auth-form.active {
+    display: block;
+    animation: fadeIn 0.3s ease;
+}
+
+.auth-form input {
+    width: 100%;
+    padding: 12px;
+    margin-bottom: 15px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+.auth-btn {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: transform 0.2s;
+}
+
+.auth-btn:hover {
+    transform: translateY(-2px);
+}
+
+/* Features Menu */
+.features-menu {
+    display: flex;
+    gap: 10px;
+    padding: 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.feature-btn {
+    flex: 1;
+    padding: 10px;
+    background: rgba(255,255,255,0.05);
+    border: none;
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.feature-btn:hover {
+    background: rgba(255,255,255,0.1);
+}
+
+.feature-btn.active {
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+}
+
+/* Feature Content */
+.feature-content {
+    display: none;
+    height: 100%;
+    flex-direction: column;
+}
+
+.feature-content.active {
+    display: flex;
+}
+
+/* User Info */
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 15px;
+    padding: 10px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 10px;
+}
+
+.user-info img {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+/* Image Generator */
+.image-generator {
+    padding: 30px;
+}
+
+.image-options {
+    display: flex;
+    gap: 15px;
+    margin: 20px 0;
+}
+
+#imageSize {
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    flex: 1;
+}
+
+.generate-btn {
+    padding: 10px 20px;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.generated-image {
+    margin: 20px 0;
+    text-align: center;
+}
+
+.generated-image img {
+    max-width: 100%;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.image-history-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.image-card {
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.image-card img {
+    width: 100%;
+    height: 150px;
+    object-fit: cover;
+}
+
+.image-card p {
+    padding: 8px;
+    font-size: 12px;
+}
+
+/* Voice Controls */
+.voice-controls {
+    padding: 30px;
+    text-align: center;
+}
+
+.record-btn, .stop-btn {
+    padding: 15px 30px;
+    margin: 0 10px;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 500;
+}
+
+.record-btn {
+    background: var(--danger);
+    color: white;
+}
+
+.stop-btn {
+    background: var(--warning);
+    color: white;
+}
+
+.voice-status {
+    margin-top: 15px;
+    font-size: 14px;
+}
+
+.recording {
+    animation: pulse 1s infinite;
+    color: var(--danger);
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.text-box, .response-box {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    margin: 15px 0;
+    min-height: 100px;
+    border: 1px solid #ddd;
+}
+
+/* File Upload */
+.file-upload-area {
+    padding: 30px;
+    text-align: center;
+}
+
+#fileInput {
+    display: none;
+}
+
+.upload-label {
+    display: inline-block;
+    padding: 40px;
+    background: #f0f0f0;
+    border: 2px dashed #ccc;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.upload-label:hover {
+    border-color: var(--primary);
+    background: #e0e0e0;
+}
+
+.upload-btn {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    margin-top: 20px;
+    background: var(--success);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.upload-progress {
+    margin: 20px;
+    height: 4px;
+    background: #f0f0f0;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: var(--success);
+    width: 0%;
+    transition: width 0.3s;
+}
+
+/* Chat Actions */
+.chat-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.action-btn {
+    padding: 8px 12px;
+    background: #f0f0f0;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.action-btn:hover {
+    background: #e0e0e0;
+}
+
+/* Logout Button */
+.logout-btn {
+    width: 100%;
+    padding: 12px;
+    background: var(--danger);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: transform 0.2s;
+}
+
+.logout-btn:hover {
+    transform: translateY(-2px);
+}
+
+/* Animations */
+@keyframes slideIn {
+    from {
+        transform: translateY(-50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .image-history-grid {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    }
+    
+    .voice-controls button {
+        padding: 10px 20px;
+        font-size: 14px;
+    }
+}
+# backend/.env
+BYTEE_API_KEY=1678a7a24768da694131a62a10a7903b
+MONGODB_URI=mongodb://localhost:27017/ai_app
+JWT_SECRET=your_super_secret_jwt_key_here
+PORT=5000
+FRONTEND_URL=http://localhost:5500
+NODE_ENV=development
+{
+  "name": "advanced-ai-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "seed": "node seed.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "bytez.js": "^1.0.0",
+    "mongoose": "^7.5.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "helmet": "^7.0.0",
+    "express-rate-limit": "^6.10.0",
+    "axios": "^1.5.0",
+    "form-data": "^4.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
+# 1. MongoDB انسٹال کریں (اگر نہیں ہے)
+# Windows: https://www.mongodb.com/try/download/community
+# Mac: brew install mongodb-community
+
+# 2. MongoDB شروع کریں
+mongod
+
+# 3. Backend انسٹال کریں
+cd backend
+npm install
+
+# 4. Backend چلائیں
+npm run dev
+
+# 5. Frontend (VS Code Live Server استعمال کریں)
+# index.html پر right-click -> Open with Live Server
+
+# 6. براؤزر میں کھولیں
+http://localhost:5500
